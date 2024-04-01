@@ -1,156 +1,92 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View, Button, TextInput, Platform } from 'react-native';
-import { useState, useEffect } from 'react';
-import { app, database, auth } from './firebase/firebaseConfig'
-import { addDoc, collection, getDocs } from 'firebase/firestore';
-import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, createUserWithEmailAndPassword, signOut } from 'firebase/auth'
-
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, TextInput, ScrollView } from 'react-native';
+import { login, signup, signOutUser, addNewDocument, fetchDocuments, subscribeToAuthChanges } from './firebase/useFirebase';
 
 export default function App() {
   const [enteredEmail, setEnteredEmail] = useState("mathias@test.dk");
   const [enteredPassword, setEnteredPassword] = useState("123456");
   const [userId, setUserId] = useState(null);
   const [enteredText, setEnteredText] = useState("");
-  const [documents, setDocuments] = useState([])
- 
+  const [documents, setDocuments] = useState([]);
 
   useEffect(() => {
-    
-    const auth_ = getAuth()
-    const unsubcribe = onAuthStateChanged(auth_, (currentUser) => {
-      if(currentUser) {
-        setUserId(currentUser.uid)
-        fetchDocuments()
+    const unsubscribe = subscribeToAuthChanges((currentUser) => {
+      if (currentUser) {
+        setUserId(currentUser.uid);
+        fetchDocuments(currentUser.uid)
+          .then(docsArray => setDocuments(docsArray))
+          .catch(error => console.log(error));
       } else {
-        setUserId(null)
+        setUserId(null);
+        setDocuments([]);
       }
-    })
-    return () => unsubcribe() //kaldes når componenten unmountes
-  }, [])
+    });
+    return () => unsubscribe();
+  }, []);
 
+  const handleLogin = () => {
+    login(enteredEmail, enteredPassword)
+      .then(uid => setUserId(uid))
+      .catch(error => console.error(error));
+  };
 
-  
-  
+  const handleSignup = () => {
+    signup(enteredEmail, enteredPassword)
+      .then(uid => setUserId(uid))
+      .catch(error => console.error(error));
+  };
 
-  async function addDocument() {
-    if (!enteredText.trim()) {
-      alert("Teksten kan ikke være tom!")
-      console.log("Teksten kan ikke være tom.");
-      return; // Afslutter funktionen tidligt, hvis betingelsen er sand
-    }
-    try {
-      // Tilføjer dokumentet til Firestore og gemmer referencen
-      const docRef = await addDoc(collection(database, userId), {
-        text: enteredText
-      });
-      
-      // Opdaterer local state med det nye dokument
-      // Bemærk, at vi bruger docRef.id til at få ID'et for det tilføjede dokument
-      setDocuments(prevDocuments => [...prevDocuments, { id: docRef.id, text: enteredText }]);
-      
-      // Nulstil indtastningsfeltet, hvis det ønskes
-      setEnteredText("");
-    } catch (error) {
-      console.log("error addDocument " + error);
-    }
-  }
-
-  async function fetchDocuments() {
+  const handleAddDocument = () => {
     if (userId) {
-      const querySnapshot = await getDocs(collection(database, userId));
-      const docsArray = [];
-      querySnapshot.forEach((doc) => {
-        docsArray.push({ id: doc.id, ...doc.data() });
-      });
-      setDocuments(docsArray);
+      addNewDocument(userId, enteredText)
+        .then(docId => {
+          setDocuments([...documents, { id: docId, text: enteredText }]);
+          setEnteredText(""); // Clear the text field
+        })
+        .catch(error => console.error(error));
     }
-  }
+  };
 
-  async function login() {
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, enteredEmail, enteredPassword);
-      setUserId(userCredential.user.uid); 
-    } catch (error) {
-      console.error("Login error:", error);
-    }
-  }
-
-  async function signup() {
-    try {
-      const userCredential = await createUserWithEmailAndPassword(auth, enteredEmail, enteredPassword);
-      setUserId(userCredential.user.uid); 
-    } catch (error) {
-      console.error("Signup error:", error);
-    }
-  }
-
-  async function sign_out() {
-    await signOut(auth)
-  }
-
-
+  const handleSignOut = () => {
+    signOutUser().then(() => {
+      setUserId(null);
+      setDocuments([]);
+    }).catch(error => console.error(error));
+  };
 
   return (
     <View style={styles.container}>
-      { !userId &&
-        <>
-          <Text>Login</Text>
-          <TextInput
-            onChangeText={newText => setEnteredEmail(newText)}
-            value={enteredEmail}
-          />
-          <TextInput
-            onChangeText={newText => setEnteredPassword(newText)}
-            value={enteredPassword}
-          />
-          <Button
-            title='Log in'
-            onPress={login}
-          />
-
-          <TextInput
-            onChangeText={newText => setEnteredEmail(newText)}
-            value={enteredEmail}
-          />
-          <TextInput
-            onChangeText={newText => setEnteredPassword(newText)}
-            value={enteredPassword}
-          />
-          <Button
-            title='Signup'
-            onPress={signup}
-          />
-        </>
-      }
-      {userId && documents.length > 0 && (
-        <>
-          {documents.map((document) => (
-            <View key={document.id} style={{margin: 10}}>
-              <Text>{document.text}</Text>
-            </View>
-          ))}
-        </>
+      {!userId ? (
+        <View style={styles.authContainer}>
+          <Text style={styles.headerText}>Login or Signup</Text>
+          <TextInput style={styles.textInput} placeholder="Email" onChangeText={setEnteredEmail} value={enteredEmail} />
+          <TextInput style={styles.textInput} placeholder="Password" onChangeText={setEnteredPassword} secureTextEntry value={enteredPassword} />
+          <TouchableOpacity style={styles.button} onPress={handleLogin}>
+            <Text style={styles.buttonText}>Log in</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.button} onPress={handleSignup}>
+            <Text style={styles.buttonText}>Signup</Text>
+          </TouchableOpacity>
+          
+        </View>
+      ) : (
+        <View style={styles.loggedInContainer}>
+          <ScrollView style={styles.documentsScrollContainer} showsVerticalScrollIndicator={false}>
+            {documents.length > 0 && documents.map((document) => (
+              <View key={document.id} style={styles.documentContainer}>
+                <Text style={styles.documentText}>{document.text}</Text>
+              </View>
+            ))}
+          </ScrollView>
+          <TextInput style={styles.textInput} placeholder="Type here" onChangeText={setEnteredText} value={enteredText} />
+          <TouchableOpacity style={styles.button} onPress={handleAddDocument}>
+            <Text style={styles.buttonText}>Add new Document</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.button} onPress={handleSignOut}>
+            <Text style={styles.buttonText}>Sign out</Text>
+          </TouchableOpacity>
+        </View>
       )}
-
-      { userId &&
-        <>
-          <TextInput
-            placeholder="type here" 
-            onChangeText={newText => setEnteredText(newText)}
-            value={enteredText}
-          />
-          <Button
-            title='Add new Document'
-            onPress={addDocument}
-          />
-          <Button
-            title='Sign out'
-            onPress={sign_out}
-          />
-          </>
-      }
-      
-      
     </View>
   );
 }
@@ -158,8 +94,56 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
+    backgroundColor: '#F5F5F5',
     justifyContent: 'center',
+    padding: 20,
+  },
+  authContainer: {
+    alignItems: 'center',
+  },
+  loggedInContainer: {
+    flex: 1,
+  },
+  documentsScrollContainer: {
+    paddingTop: 40,
+    flex: 1,
+    width: '100%', // Sikrer, at ScrollView fylder bredden
+  },
+  textInput: {
+    height: 40,
+    width: '100%',
+    borderColor: '#ccc',
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 10,
+    marginBottom: 20,
+    backgroundColor: '#fff',
+  },
+  button: {
+    backgroundColor: '#007BFF',
+    padding: 10,
+    borderRadius: 20,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  buttonText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+  },
+  documentContainer: {
+    padding: 10,
+    borderRadius: 10,
+    backgroundColor: '#E3E3E3',
+    marginBottom: 10,
+  },
+  documentText: {
+    color: '#333333',
+  },
+  headerText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#333',
   },
 });
